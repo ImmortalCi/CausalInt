@@ -202,10 +202,14 @@ def main():
         args.max_train_steps = args.num_train_epochs * num_update_steps_per_epoch
 
     # 改了一下参数？！！这个优化器目前有问题，需要补全。
-    optimizer_adam = create_optimizer(model.trainable_params(), init_lr = args.learning_rate, \
-                                      num_train_steps = args.max_train_steps * args.gradient_accumulation_steps, \
-                                      num_warmup_steps = args.num_warmup_steps * args.gradient_accumulation_steps,
-                                      eps = 5e-8)
+    # optimizer_adam = create_optimizer(model.trainable_params(), init_lr = args.learning_rate, \
+    #                                   num_train_steps = args.max_train_steps * args.gradient_accumulation_steps, \
+    #                                   num_warmup_steps = args.num_warmup_steps * args.gradient_accumulation_steps,
+    #                                   eps = 5e-8)
+    """
+    尝试重写优化器，2月26日，临时改成Momentum，测试一下效果
+    """
+    optimizer_adam = Momentum(params=model.trainable_params(), learning_rate=0.001, momentum=0.9)
     #optimizer = mindspore.nn.Adam(optimizer_grouped_parameters, learning_rate=args.learning_rate, eps=5e-8)
     #print(args.num_warmup_steps * args.gradient_accumulation_steps)
     #lr_scheduler = get_scheduler(
@@ -261,10 +265,7 @@ def main():
             # print(type(batch['click'].shape[0]))
             # exit()
 
-            """
-            尝试重写优化器，2月26日，临时改成Momentum，测试一下效果
-            """
-            optimizer_adam = Momentum(params=model.trainable_params(), learning_rate=0.001, momentum=0.9)
+
             train_one_step = mindspore.nn.TrainOneStepCell(model, optimizer_adam)
 
 
