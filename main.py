@@ -3,7 +3,7 @@ import argparse
 from mindspore.dataset import CSVDataset
 import numpy as np
 # from model_mindspore import Causallnt
-from model_debug_217 import Causallnt
+from model import Causallnt
 import math
 from dataclasses import dataclass
 import os
@@ -17,8 +17,65 @@ from mindspore import ops
 from mindspore.ops import GradOperation
 from mindspore.nn.optim import Momentum
 
+# 初步
+from mindspore.context import ParallelMode
+from mindspore import nn
+from mindspore import ops
+from mindspore import Tensor, Parameter
+from mindspore import ParameterTuple
 
-#mindspore.context.set_context(mode=mindspore.context.PYNATIVE_MODE)
+import mindspore.ops.functional as F
+from mindspore.ops import composite as C
+from mindspore import dtype as mstype
+from mindspore import context
+from mindspore import ms_function
+from mindspore.communication.management import get_group_size
+from mindspore.parallel._auto_parallel_context import auto_parallel_context
+
+
+mindspore.context.set_context(mode=mindspore.context.PYNATIVE_MODE)
+
+class WithGradCell(nn.Cell):
+    """train one step cell with sense"""
+
+    def __init__(self, network, optimizer, clip_value=0.1):
+        super().__init__()
+        self.network = network
+        self.network.set_grad()
+        self.optimizer = optimizer
+        self.weights = self.optimizer.parameters
+        self.grad = ops.GradOperation(get_by_list=True, sens_param=True)
+        self.scale_sense = Parameter(Tensor(1., dtype=mstype.float32), name="scale_sense")
+        self.reducer_flag = False
+        self.grad_reducer = None
+        self.max_grad_norm = clip_value
+        self.parallel_mode = context.get_auto_parallel_context("parallel_mode")
+        if self.parallel_mode in [ParallelMode.DATA_PARALLEL, ParallelMode.HYBRID_PARALLEL]:
+            self.reducer_flag = True
+        if self.reducer_flag:
+            mean = context.get_auto_parallel_context("gradients_mean")
+            if auto_parallel_context().get_device_num_is_set():
+                degree = context.get_auto_parallel_context("device_num")
+            else:
+                degree = get_group_size()
+            self.grad_reducer = nn.DistributedGradReducer(optimizer.parameters, mean, degree)
+        # this is a hack
+        self.enable_tuple_broaden = True
+
+    @ms_function
+    def clip_backward(self, loss, grads):
+        grads = ops.clip_by_global_norm(grads, clip_norm=self.max_grad_norm)
+        if self.reducer_flag:
+            grads = self.grad_reducer(grads)
+        loss = ops.depend(loss, self.optimizer(grads))
+        return loss
+
+    def construct(self, *inputs):
+        """construct"""
+        loss = self.network(*inputs)
+        grads = self.grad(self.network, self.weights)(*inputs, self.scale_sense)
+        return self.clip_backward(loss, grads)
+
 
 class WarmUpPolynomialDecayLR(LearningRateSchedule):
     """"""
@@ -209,7 +266,7 @@ def main():
     """
     尝试重写优化器，2月26日，临时改成Momentum，测试一下效果
     """
-    optimizer_adam = Momentum(params=model.trainable_params(), learning_rate=0.001, momentum=0.9)
+    optimizer = Momentum(params=model.trainable_params(), learning_rate=0.001, momentum=0.9)
     #optimizer = mindspore.nn.Adam(optimizer_grouped_parameters, learning_rate=args.learning_rate, eps=5e-8)
     #print(args.num_warmup_steps * args.gradient_accumulation_steps)
     #lr_scheduler = get_scheduler(
@@ -220,7 +277,8 @@ def main():
     #)
     args.num_train_epochs = math.ceil(args.max_train_steps / num_update_steps_per_epoch)
 
-
+    # 初始化训练模块
+    train_module = WithGradCell(model, optimizer)
     def cal_auc(label: list, pred: list):
         auc = roc_auc_score(label, pred)
         return auc
@@ -258,25 +316,28 @@ def main():
             t.set_description(f"epoch {epoch+1} step {step+1}:")
             #print("ok4!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!")
 
-            # # 调试前向传播维度
-            # print(batch)
-            # print(batch.keys())
-            # print(batch['click'].shape[0])
-            # print(type(batch['click'].shape[0]))
-            # exit()
 
+            # 尝试更换训练写法
+            # grad = ops.GradOperation()(model)(batch)
+            # import pdb
+            # pdb.set_trace()
+            # optimizer_adam(grad)
 
-            train_one_step = mindspore.nn.TrainOneStepCell(model, optimizer_adam)
+            # 老版本
+            # train_one_step = mindspore.nn.TrainOneStepCell(model, optimizer_adam)
+            # loss = train_one_step(batch).view(1)
 
+            # 使用新写法
 
-            # print(train_one_step)
+            loss = train_module(batch).view(1)
+            # import pdb
+            # pdb.set_trace()
 
             """
             ms只支持单输出loss的网络，精简输出
             """
             # loss, loss_1, loss_2, loss_3, loss_orth, loss_d, loss_orth_all = model.construct(batch)
             # loss = model.construct(batch)
-            loss = train_one_step(batch).view(1)
             print("ok6!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!")
             total_loss += loss.item()
             print("ok7!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!")
@@ -335,6 +396,8 @@ def main():
                 for key in batch.keys():
                     batch[key]=batch[key]
                 logits=model(batch)
+                # import pdb
+                # pdb.set_trace()
                 # weight, bias, rp, logits = model(batch)
                 # print('weights: \n',  weight)
                 # print('bias: \n' , bias)
@@ -371,6 +434,7 @@ def main():
             best_test_auc=test_auc
             best_epoch=epoch+1
     fw.write(f"best epoch:{best_epoch}")
+    fw.close()
 
 
 
