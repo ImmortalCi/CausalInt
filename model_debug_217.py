@@ -145,30 +145,31 @@ class Causallnt(nn.Cell):
         self.ratio = 1
         self.__init_weight()
 
+        # 求取grad的写法会报错
+        # self.cal_grad_1 = ops.grad(self.calculate_loss_1)
+        self.cal_grad_temp = ops.grad(self.calculate_temp_loss, grad_position=0)
 
-        self.cal_grad_1 = ops.grad(self.calculate_loss_1)
-        self.cal_grad_temp = ops.grad(self.calculate_temp_loss)
         # self.batch_norm=torch.nn.BatchNorm1d(256)
         # self.dropout=torch.nn.Dropout(p=0.1)
 
-        # # 尝试提前实例化所有子网络，避免参数重名
-        # self.net_loss_list = nn.CellList()
-        # net_loss_1 = Net_loss_1(self.invariant_feature_extractor, self.general_classifier,
-        #                         nn.BCEWithLogitsLoss())
-        # net_loss_2 = Net_loss_2(self.scenario_feature_extractor, self.scenario_classifier,
-        #                         nn.SoftmaxCrossEntropyWithLogits(reduction="mean"))
-        # net_loss_1_meta_learning = Net_loss_1_meta_learning(self.general_classifier, nn.BCEWithLogitsLoss())
-        # self.net_loss_list.append(net_loss_1)
-        # self.net_loss_list.append(net_loss_2)
-        # self.net_loss_list.append(net_loss_1_meta_learning)
-        # # 针对三个scenario_classifier_d， 分别实例化
-        # self.net_loss_temp_list = nn.CellList()
-        # net_loss_tmp_1 = Net_loss_temp(nn.BCEWithLogitsLoss(), self.scenario_classifier_d[0], self.fuse_representation)
-        # net_loss_tmp_2 = Net_loss_temp(nn.BCEWithLogitsLoss(), self.scenario_classifier_d[1], self.fuse_representation)
-        # net_loss_tmp_3 = Net_loss_temp(nn.BCEWithLogitsLoss(), self.scenario_classifier_d[2], self.fuse_representation)
-        # self.net_loss_temp_list.append(net_loss_tmp_1)
-        # self.net_loss_temp_list.append(net_loss_tmp_2)
-        # self.net_loss_temp_list.append(net_loss_tmp_3)
+        # 尝试提前实例化所有子网络，避免参数重名
+        self.net_loss_list = nn.CellList()
+        net_loss_1 = Net_loss_1(self.invariant_feature_extractor, self.general_classifier,
+                                nn.BCEWithLogitsLoss())
+        net_loss_2 = Net_loss_2(self.scenario_feature_extractor, self.scenario_classifier,
+                                nn.SoftmaxCrossEntropyWithLogits(reduction="mean"))
+        net_loss_1_meta_learning = Net_loss_1_meta_learning(self.general_classifier, nn.BCEWithLogitsLoss())
+        self.net_loss_list.append(net_loss_1)
+        self.net_loss_list.append(net_loss_2)
+        self.net_loss_list.append(net_loss_1_meta_learning)
+        # 针对三个scenario_classifier_d， 分别实例化
+        self.net_loss_temp_list = nn.CellList()
+        net_loss_tmp_1 = Net_loss_temp(nn.BCEWithLogitsLoss(), self.scenario_classifier_d[0], self.fuse_representation)
+        net_loss_tmp_2 = Net_loss_temp(nn.BCEWithLogitsLoss(), self.scenario_classifier_d[1], self.fuse_representation)
+        net_loss_tmp_3 = Net_loss_temp(nn.BCEWithLogitsLoss(), self.scenario_classifier_d[2], self.fuse_representation)
+        self.net_loss_temp_list.append(net_loss_tmp_1)
+        self.net_loss_temp_list.append(net_loss_tmp_2)
+        self.net_loss_temp_list.append(net_loss_tmp_3)
 
     def __init_weight(self, ):  # mindspore中没有ModuleDict容器，使用CellList和Dict替换。
         cnt = 0
@@ -187,61 +188,21 @@ class Causallnt(nn.Cell):
         leaky_relu = nn.LeakyReLU(0.2)
         return leaky_relu(self.scenario_feature_extractor(x))
 
-    # def test_loss_1(self, inputs, labels):
-    #     loss_fct = nn.BCEWithLogitsLoss(pos_weight=mindspore.Tensor([self.ratio], dtype=mindspore.float32))
-    #     logits = self.general_classifier(inputs)
-    #     loss = loss_fct(logits, labels.view(-1, 1).astype(mindspore.float32))
-    #     return loss
+    def test_loss_1(self, inputs, labels):
+        loss_fct = nn.BCEWithLogitsLoss(pos_weight=mindspore.Tensor([self.ratio], dtype=mindspore.float32))
+        logits = self.general_classifier(inputs)
+        loss = loss_fct(logits, labels.view(-1, 1).astype(mindspore.float32))
+        return loss
 
     def calculate_loss_1(self, Invariant_Representation, labels, contxt):
         if contxt == 1:  # 代表需要求导（也就是输入的不是IR，而是原始的input）
             Invariant_Representation = self.invariant_feature_extractor(Invariant_Representation)
 
-        # 这个loss会报错，很奇怪
-        # loss_fct = nn.BCEWithLogitsLoss(pos_weight=mindspore.Tensor(
-        #     [self.ratio]).astype(
-        #     mindspore.float32))  # pos_weight=mindspore.Tensor([self.ratio], dtype=mindspore.float32)
-
         loss_fct = nn.BCEWithLogitsLoss(pos_weight=mindspore.Tensor([self.ratio], dtype=mindspore.float32))
-        # loss_fct = nn.SoftmaxCrossEntropyWithLogits(reduction="mean")
 
         logits = self.general_classifier(Invariant_Representation)
-        # print("@"*50)
-        # print("Invariant_Representation:", Invariant_Representation)
-        # print("self.general_classifier:", self.general_classifier.trainable_params())
-        # print("logits:", logits)
-        # print("labels:", labels)
-        #
-        # print("测试一下单独抽取出结果，跑一个loss检查")
-        # temp_logits = logits
-        # temp_labels = labels.view(-1, 1).astype(mindspore.float32)
-        # temp_loss_func = nn.BCEWithLogitsLoss()
-        # temp_loss = temp_loss_func(temp_logits, temp_labels)
-        # print("测试的loss输出结果为：", temp_loss)
-        # if temp_loss != temp_loss:
-        #     with open('temp_debug.txt', mode="w+") as f:
-        #         f.write(str(input1))
-        #         f.write('\n')
-        #         f.write(str(input2))
-        #         f.write('\n')
-        #         f.write(str(embedding_list))
-        #         f.write('\n')
-        #         f.write(str(origin_input))
-        #         f.write('\n')
-        #         f.write(str(Invariant_Representation))
-        #         f.write('\n')
-        #         f.write(str(temp_logits))
-        #         f.write('\n')
-        #         f.write(str(temp_labels))
-        #         f.write('\n')
-        #         f.write(str(temp_loss))
-        #     exit()
-        # print("@"*50)
-        # if self._phase == 'train':
+
         if self.training:
-            # print("labels :", labels.view(-1,1).shape)
-            # print("logits :", logits.shape)
-            # print("@"*50)
             loss = loss_fct(logits, labels.view(-1, 1).astype(mindspore.float32))
             return loss
         else:
@@ -252,9 +213,6 @@ class Causallnt(nn.Cell):
             Scenario_Representation = self.scenario_feature_extractor(Scenario_Representation)
         softmax = nn.Softmax(axis=-1)
         logits = self.scenario_classifier(Scenario_Representation)
-        # print(logits.shape)
-        # print(logits.view(-1, logits.shape[-1]) == logits)
-        # exit()
         probs = softmax(logits)
         if self.training:
             loss_fct = nn.SoftmaxCrossEntropyWithLogits(reduction="mean")
@@ -263,7 +221,6 @@ class Causallnt(nn.Cell):
             broadcast_to = ops.BroadcastTo(shape)
             scenarios = broadcast_to(scenarios.view(-1, 1).astype(mindspore.float32))
 
-            # scenarios = scenarios.view(-1, 1).broadcast_to((6000, 3)).astype(mindspore.float32) # 6000同样是batch size
             loss = loss_fct(logits.view(-1, logits.shape[-1]).astype(mindspore.float32),
                             scenarios)  # 我改了一下，argmax去掉了/第二次修改，强制把scenarios转换为2维（估计还是不自动广播带来的问题）
             return loss, probs
@@ -274,30 +231,27 @@ class Causallnt(nn.Cell):
         loss_fct = nn.BCEWithLogitsLoss(pos_weight=mindspore.Tensor([self.ratio], dtype=mindspore.float32))
         representation = ops.Concat(axis=-1)((Invariant_Representation, Scenario_Representation))
         logits = self.general_classifier_concatenated(representation)
-        # logits += self.ratio  # 这里是为啥？
         loss = loss_fct(logits, labels.view(-1, 1).astype(mindspore.float32))
 
         return loss
 
-    # def calculate_loss_orth(self, inputs, labels, scenarios, contxt, batch_size):
-    #     loss = mindspore.Tensor(0., dtype=mindspore.float32)
-    #     # grads_1_norm = self.get_grad_on_embeddings(self.calculate_loss_1, (inputs, labels, scenarios, contxt))
-    #     # grads_2_norm = self.get_grad_on_embeddings(self.calculate_loss_2, (inputs, scenarios, contxt, batch_size))
-    #
-    #     # grads_1_norm = self.get_grad_on_embeddings((inputs, labels), 1, 1)
-    #     # grads_2_norm = self.get_grad_on_embeddings((inputs, scenarios_broadcast), 1, 2)
-    #
-    #     # 再次尝试修改求导；
-    #     cal_grad_1 = ops.grad(self.calculate_loss_1)
-    #     cal_grad_2 = ops.grad(self.calculate_loss_2)
-    #     grad_1 = cal_grad_1(inputs, labels, 1)
-    #     grad_2 = cal_grad_2(inputs, scenarios, 1, batch_size)
-    #     grads_1_norm = self.get_grad_on_embeddings(grad_1)
-    #     grads_2_norm = self.get_grad_on_embeddings(grad_2)
-    #
-    #     loss = ops.ReduceSum()(grads_1_norm * grads_2_norm, 1)
-    #     loss = ops.Square()(loss).mean()  ##ops.Square()
-    #     return loss
+    def calculate_loss_orth(self, inputs, labels, scenarios_broadcast, contxt, batch_size):
+        loss = mindspore.Tensor(0., dtype=mindspore.float32)
+
+        grads_1_norm = self.get_grad_on_embeddings((inputs, labels), 1, 1)
+        grads_2_norm = self.get_grad_on_embeddings((inputs, scenarios_broadcast), 1, 2)
+
+        # # 再次尝试修改求导；
+        # cal_grad_1 = ops.grad(self.calculate_loss_1)
+        # cal_grad_2 = ops.grad(self.calculate_loss_2)
+        # grad_1 = cal_grad_1(inputs, labels, 1)
+        # grad_2 = cal_grad_2(inputs, scenarios, 1, batch_size)
+        # grads_1_norm = self.get_grad_on_embeddings(grad_1)
+        # grads_2_norm = self.get_grad_on_embeddings(grad_2)
+
+        loss = ops.ReduceSum()(grads_1_norm * grads_2_norm, 1)
+        loss = ops.Square()(loss).mean()  ##ops.Square()
+        return loss
 
     def fuse_representation(self, d, Scenario_Representation, Invariant_Representation, probs):
         leaky_relu = nn.LeakyReLU(alpha=0.2)
@@ -306,28 +260,16 @@ class Causallnt(nn.Cell):
         Expert = []
         # print(1.1)
         for p in range(self.num_of_scenario):
-            # print(1.2)
-            # print(self.scenario_feature_extractor_p[p])
-            # print(1.3)
-            # print(Scenario_Representation)
-            # print(1.4)
-            # print(self.scenario_feature_extractor_p[p](Scenario_Representation))
-            # print(1.5)
             h = leaky_relu(self.scenario_feature_extractor_p[p](Scenario_Representation))
-            # print(2)
             H.append(h)
             if d == p:
                 Expert.append(H[p])
             else:
                 Expert.append(H[p].copy())
-            # print(3)
         TransNet = ops.ZerosLike()(Expert[0])
-        # print(4)
         for p in range(self.num_of_scenario):
             TransNet = TransNet + probs[:, p:p + 1] * Expert[p]
-        # print(5)
         X = self.w(Invariant_Representation)
-        # print(6)
         return ops.ReduceSum()(ops.ExpandDims()(X, -1) * TransNet.view(-1, 16, 16), 1)
 
     def calculate(self, Invariant_Representation_index, Scenario_Representation_index, labels, probs, index, scenario,
@@ -370,27 +312,12 @@ class Causallnt(nn.Cell):
 
             # True->1; False->0
             # 必须得转换成numpy再转回来，否则take操作会报[fill]操作不支持，目前还没发现原因。
-            index_numpy = ops.nonzero(scenarios == scenario).view(-1).asnumpy()  # 1.7不支持这个操作，如下⬇️等价
-            index = mindspore.Tensor(index_numpy)
-            # tensor = (scenarios == scenario)
-            # tensor1 = ops.nonzero(tensor).view(-1)
-            # index = ops.nonzero(scenarios == scenario).view(-1).astype(mindspore.float32)  # 1.7不支持这个操作，如下⬇️等价
-            # print(index.shape)
-            # # print(index_1)
-            # # print('step2```````````````````````````````````````````````finished')
-            # index_list = []
-            # data = (scenarios == scenario).view(-1)
-            #
-            # for index, j in tqdm(enumerate(data)):
-            #     if j == 1:  # 转tensor才能比较
-            #         index_list.append(index)
-            # index = mindspore.Tensor(index_list)
-            # print(index.shape)
-            # exit()
-            #
-            # print(index_2)
-            # print(index_1==index_2)
-            # exit()
+            # index_numpy = ops.nonzero(scenarios == scenario).view(-1).asnumpy()  # 1.7不支持这个操作，如下⬇️等价
+            # index = mindspore.Tensor(index_numpy)
+            index = ops.nonzero(scenarios == scenario).view(-1).asnumpy()
+            index = mindspore.Tensor(index)
+            # print('场景为', scenario)
+            # print('样本数', index.shape)
 
             # print('step3````````````````````````````````````````````finished')
             if index.shape[0] == 0:  # 当前batch没有属于场景d的样本
@@ -408,22 +335,27 @@ class Causallnt(nn.Cell):
                 logits = self.scenario_classifier_d[i](representation)
 
                 if self.training:
-                    # loss_fct = nn.BCEWithLogitsLoss(pos_weight=mindspore.Tensor([self.ratio], dtype=mindspore.float32))
-                    # temp_loss = self.calculate_temp_loss(Invariant_Representation_index, Scenario_Representation_index,
-                    #                                      labels, index, scenario, scenarios, probs)  # 去掉抽离，测试
                     temp_loss = loss_fct(logits,
                                              labels.take(index, 0).view(-1, 1).astype(mindspore.float32)) * (
                                             index.shape[0] / scenarios.shape[0])
+
+                    # 尝试看logits、labels信息
+                    # print('logits:', logits)
+                    # print('labels:', labels)
+                    # print('labels selected', labels.take(index, 0).view(-1, 1).astype(mindspore.float32))
                     loss_list.append(temp_loss)
 
                     # # 求取grad，放入grad_list中
+
                     # grad = self.calculate_grad((Invariant_Representation_index, Scenario_Representation_index,
                     #                             labels, index, scenario, scenarios, probs), 2, scenario + 1).sum(axis=0,
                     #                                                                                              keepdims=True)
-                    grad = self.cal_grad_temp(Invariant_Representation_index, Scenario_Representation_index,
-                                              labels, index, scenario, scenarios, probs).sum(axis=0, keepdims=True)
-                    grad_list.append(grad)
+                    # grad = self.cal_grad_temp(Invariant_Representation_index, Scenario_Representation_index,
+                    #                           labels, index, scenario, scenarios, probs).sum(axis=0, keepdims=True)
+                    grad_list.append(1)
 
+
+                    print(temp_loss)
                     loss = loss + temp_loss
                 else:
                     all_logits = ops.Concat(axis=0)((all_logits, logits.view(-1)))
@@ -436,31 +368,31 @@ class Causallnt(nn.Cell):
                                    axis=0)
             # return self.scenario_classifier_d[2].weight.asnumpy(), self.scenario_classifier_d[2].bias.asnumpy(), representation, logits
 
-    # def calculate_loss_orth_all(self, loss_list, Invariant_Representation, inputs, scenarios, grad_list):
-    #     def proj(m, n):
-    #         ratio = ops.ReduceSum()(m * n, axis=1) / (ops.ReduceSum()(m * m, axis=1) + 1e-9)
-    #         return ratio.view(-1, 1) * m
-    #
-    #     g = []
-    #     b = []
-    #     for i in range(self.num_of_scenario):
-    #         g.append(grad_list[i])
-    #     for i in range(self.num_of_scenario):
-    #         if g[i] is None:
-    #             b.append(None)
-    #             continue
-    #         temp = g[i]
-    #         for j in range(i):
-    #             if b[j] is None:
-    #                 continue
-    #             temp = temp - proj(b[j], g[i])
-    #         b.append(temp)
-    #     loss = mindspore.Tensor(0., dtype=mindspore.float32)  #######!!!!!!
-    #     for i in range(self.num_of_scenario):
-    #         if g[i] is None:
-    #             continue
-    #         loss = loss + ((g[i] - b[i]) ** 2).sum() / 2
-    #     return loss
+    def calculate_loss_orth_all(self, loss_list, Invariant_Representation, inputs, scenarios, grad_list):
+        def proj(m, n):
+            ratio = ops.ReduceSum()(m * n, axis=1) / (ops.ReduceSum()(m * m, axis=1) + 1e-9)
+            return ratio.view(-1, 1) * m
+
+        g = []
+        b = []
+        for i in range(self.num_of_scenario):
+            g.append(grad_list[i])
+        for i in range(self.num_of_scenario):
+            if g[i] is None:
+                b.append(None)
+                continue
+            temp = g[i]
+            for j in range(i):
+                if b[j] is None:
+                    continue
+                temp = temp - proj(b[j], g[i])
+            b.append(temp)
+        loss = mindspore.Tensor(0., dtype=mindspore.float32)  #######!!!!!!
+        for i in range(self.num_of_scenario):
+            if g[i] is None:
+                continue
+            loss = loss + ((g[i] - b[i]) ** 2).sum() / 2
+        return loss
 
     def get_grad_on_embeddings(self, inputs, lst_num, loss_num):
         grads = self.calculate_grad(inputs, lst_num, loss_num)
@@ -561,10 +493,6 @@ class Causallnt(nn.Cell):
                 idx = self.embedding_dict[name]
                 input = self.embedding_list[idx](batch[name])
 
-            # # 测试nan出现的原因！
-            # if input != input:
-            #     print(name)
-            #     exit()
             if inputs is None:
                 inputs = input
             else:
@@ -573,15 +501,6 @@ class Causallnt(nn.Cell):
         inputs = inputs.astype(mindspore.float32)
         Invariant_Representation = self.invariant_feature_extractor(inputs).astype(mindspore.float32)
         Scenario_Representation = self.scenario_feature_extractor(inputs).astype(mindspore.float32)
-        # print("@"*50)
-        # print("inputs:", inputs)
-        # for name, param in self.invariant_feature_extractor.parameters_and_names():
-        #     print(f"{name}:\n{param.asnumpy()}")
-        # print("self.invariant_feature_extractor", self.invariant_feature_extractor.parameters_dict())
-        # print("Invariant_Representation:", Invariant_Representation)
-        # print("@"*50)
-        # print(inputs.shape)
-        # exit()
 
         if self.training:
             print("ok20!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!")
@@ -591,27 +510,28 @@ class Causallnt(nn.Cell):
             print("loss_2 finished!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!", loss_2)
             loss_3 = self.calculate_loss_3(Invariant_Representation, Scenario_Representation, labels, scenarios)
             print("loss_3 finished!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!", loss_3)
-            # loss_orth = self.calculate_loss_orth(inputs, labels, scenarios, 1, batch_size)
+            # loss_orth = self.calculate_loss_orth(inputs, labels, scenarios_broadcast, 1, batch_size)
             # print("loss_orth finished!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!", loss_orth)
 
-            # grad = ops.grad(self.test_loss_1, grad_position=0)(Invariant_Representation, labels)
-            #
+
+
             # Invariant_Representation_ = Invariant_Representation - self.lr * self.calculate_grad((
             #     Invariant_Representation, labels), 1, 3)
+            # grad = ops.grad(self.test_loss_1, grad_position=0)(Invariant_Representation, labels)
             # Invariant_Representation_ = Invariant_Representation - self.lr * grad
-
+            #
             # print("Invariant_Representation_finished!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!")
             # loss_d, loss_d_list, grad_list = self.calculate_loss_d(Invariant_Representation_, Scenario_Representation,
             #                                                        labels, scenarios, probs)
-            # loss_d = self.calculate_loss_d(Invariant_Representation, Scenario_Representation,
-            #                                                        labels, scenarios, probs)
-            # print("loss_d,loss_d_list,grad_list finished!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!", loss_d)
+            loss_d = self.calculate_loss_d(Invariant_Representation, Scenario_Representation,
+                                                                   labels, scenarios, probs)
+            print("loss_d,loss_d_list,grad_list finished!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!", loss_d)
             # loss_orth_all = self.calculate_loss_orth_all(loss_d_list, Invariant_Representation, inputs, scenarios,
             #                                              grad_list)
             # print("loss_orth_all finished!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!", loss_orth_all)
             # # loss = loss_d
-            # # loss = loss_1 + loss_2 + loss_3 + loss_orth + loss_d + loss_orth_all
-            loss = loss_1 + loss_2 + loss_3
+            # loss = loss_1 + loss_2 + loss_3 + loss_orth + loss_d + loss_orth_all
+            loss = loss_1 + loss_2 + loss_3 + loss_d
 
             print("loss finished!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!", loss)
             return loss
